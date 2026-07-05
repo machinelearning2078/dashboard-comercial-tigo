@@ -26,7 +26,7 @@ st.markdown("---")
 # ============================================================
 @st.cache_data
 def load_data():
-    ruta = r"C:\Users\DELL\Desktop\Tigo_Prueba\facturacion.parquet"
+    ruta = "facturacion.parquet"
     df = pd.read_parquet(ruta)
     
     # Limpiar nombres
