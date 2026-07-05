@@ -153,6 +153,7 @@ total_cajas = df_filtrado['Cant. Cajas'].sum()
 num_clientes = df_filtrado['Código Cliente'].nunique()
 num_facturas = df_filtrado['N° Documento'].nunique()
 ticket_prom = total_ventas / num_facturas if num_facturas > 0 else 0
+dropsize_prom = total_cajas / num_facturas if num_facturas > 0 else 0
 
 def fmt_currency(val):
     return f"${val:,.2f}"
@@ -248,7 +249,7 @@ with tab2:
         pivot.columns = [pd.to_datetime(c + '-01').strftime('%b %Y') for c in pivot.columns]
         fig = px.imshow(pivot,
                         labels=dict(x="Mes-Año", y=index_col, color="Ventas ($)"),
-                        title=f"{title} ({periodo_texto})",
+                        title=generar_titulo(title, filtros_nombres_heat),
                         color_continuous_scale=color_scale,
                         aspect="auto",
                         text_auto='.1s')
@@ -272,7 +273,7 @@ with tab2:
         fig_heat_dropsize = px.imshow(
             pivot_dropsize,
             labels=dict(x="Mes-Año", y="Región", color="Dropsize Prom."),
-            title=f"Dropsize Promedio por Mes y Región ({periodo_texto})",
+            title=generar_titulo(f"Dropsize Promedio por Mes y Región ({periodo_texto})", filtros_nombres_heat),
             color_continuous_scale='Reds',
             aspect="auto",
             text_auto='.1s'
@@ -287,6 +288,7 @@ with tab2:
     
     top_n = st.slider("Número de elementos en el top", min_value=3, max_value=10, value=5, key="top_n")
     
+    # Ticket Promedio por Cliente
     top_ticket = df_filtrado.groupby('Nombre Cliente').agg({
         'Precio Por Renglon': 'sum',
         'N° Documento': 'nunique'
@@ -312,6 +314,7 @@ with tab2:
         """)
         st.caption("El ticket promedio se calcula a nivel global para el período filtrado.")
     
+    # Dropsize por Cliente
     top_dropsize = df_filtrado.groupby('Nombre Cliente')['Dropsize'].mean().reset_index()
     top_dropsize = top_dropsize.sort_values('Dropsize', ascending=False).head(top_n)
     
@@ -323,6 +326,16 @@ with tab2:
     fig_top_dropsize.update_traces(textposition='outside')
     fig_top_dropsize.update_layout(height=400, xaxis_tickangle=-45)
     st.plotly_chart(fig_top_dropsize, use_container_width=True)
+    
+    # 🔥 NUEVO EXPANDER DE DROPSIZE
+    with st.expander("📋 Detalle del cálculo del Dropsize"):
+        st.markdown(f"""
+        **Dropsize** = Total de Cajas por Factura (N° Documento)  
+        - **Total de Cajas**: {total_cajas:,.0f}  
+        - **Número de Facturas**: {num_facturas:,}  
+        - **Dropsize Promedio Global**: {dropsize_prom:,.1f} cajas/factura
+        """)
+        st.caption("El dropsize promedio se calcula a nivel global para el período filtrado.")
 
 # ============================================================
 # TAB 3: PRONÓSTICOS
@@ -496,7 +509,7 @@ with tab3:
             st.markdown("- **ARIMA**: modelo autorregresivo integrado de media móvil, robusto para series con autocorrelación.")
 
 # ============================================================
-# TAB 4: CLIENTES RFM
+# TAB 4: CLIENTES RFM (con gráfico de barras en lugar de circular)
 # ============================================================
 with tab4:
     st.subheader("Segmentación RFM de Clientes")
@@ -565,9 +578,14 @@ with tab4:
     with col1:
         st.dataframe(seg_counts, use_container_width=True)
     with col2:
-        fig_pie = px.pie(seg_counts, values='Clientes', names='Segmento', title='% por Segmento',
-                         color='Segmento', color_discrete_map=color_map)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        # 🔥 CAMBIO: gráfico de barras en lugar de circular
+        fig_bar = px.bar(seg_counts, x='Segmento', y='Clientes', 
+                         title='Clientes por Segmento',
+                         color='Segmento', color_discrete_map=color_map,
+                         text='Clientes')
+        fig_bar.update_traces(textposition='outside')
+        fig_bar.update_layout(height=400, showlegend=False)
+        st.plotly_chart(fig_bar, use_container_width=True)
     
     st.write("**Detalle de clientes por segmento (top 10 por monto):**")
     for seg in ['VIP', 'Leales', 'En Riesgo', 'Dormidos', 'Nuevos', 'Otros']:
