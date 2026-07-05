@@ -22,10 +22,19 @@ st.title("📊 Análisis Comercial Interactivo")
 st.markdown("---")
 
 # ============================================================
-# 1. CARGA Y LIMPIEZA DE DATOS (con caché y filtro por año)
+# 1. FUNCIONES DE CARGA CON FILTRO POR AÑO
 # ============================================================
 @st.cache_data
+def get_available_years():
+    """Obtiene los años disponibles en los datos (rápido, solo lee fechas)"""
+    df = pd.read_parquet("facturacion.parquet")
+    df['F. Emisión'] = pd.to_datetime(df['F. Emisión'], dayfirst=True, errors='coerce')
+    years = sorted(df['F. Emisión'].dt.year.dropna().unique(), reverse=True)
+    return years
+
+@st.cache_data
 def load_data(selected_year=2025):
+    """Carga datos filtrados por año para ahorrar memoria"""
     ruta = "facturacion.parquet"
     df = pd.read_parquet(ruta)
     
@@ -38,9 +47,8 @@ def load_data(selected_year=2025):
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
     
-    # 🔥 FILTRO POR AÑO PARA AHORRAR MEMORIA (carga solo el año seleccionado)
-    # Si selected_year es 0, carga todos los datos (menos recomendado)
-    if selected_year != 0:
+    # 🔥 FILTRO POR AÑO: carga solo el año seleccionado (por defecto 2025)
+    if selected_year != 0:  # 0 = "Todos"
         df = df[df['F. Emisión'].dt.year == selected_year]
     
     # Convertir numéricos
@@ -72,21 +80,12 @@ def load_data(selected_year=2025):
 # ============================================================
 st.sidebar.header("🔍 Filtros")
 
-# Primero cargamos un DataFrame ligero solo para obtener los años disponibles
-# (esto es rápido porque solo leemos la columna de fecha)
-@st.cache_data
-def get_available_years():
-    df = pd.read_parquet("facturacion.parquet")
-    # Convertir columna fecha
-    df['F. Emisión'] = pd.to_datetime(df['F. Emisión'], dayfirst=True, errors='coerce')
-    years = sorted(df['F. Emisión'].dt.year.dropna().unique(), reverse=True)
-    return years
-
+# Obtener años disponibles
 available_years = get_available_years()
-year_options = [0] + available_years  # 0 significa "Todos"
+year_options = [0] + available_years  # 0 = "Todos"
 year_labels = ["Todos"] + [str(y) for y in available_years]
 
-selected_year_label = st.sidebar.selectbox("Año", year_labels, index=0)
+selected_year_label = st.sidebar.selectbox("📅 Año", year_labels, index=1 if 2025 in available_years else 0)
 selected_year = 0 if selected_year_label == "Todos" else int(selected_year_label)
 
 # Cargar datos con el año seleccionado
@@ -94,6 +93,10 @@ df = load_data(selected_year)
 st.sidebar.success(f"✅ Datos cargados: {len(df):,} registros")
 
 # Filtros de fechas (dentro del año seleccionado)
+if df.empty:
+    st.warning("No hay datos para el año seleccionado.")
+    st.stop()
+
 min_date = df['F. Emisión'].min().date()
 max_date = df['F. Emisión'].max().date()
 
@@ -193,7 +196,6 @@ with tab1:
         }).reset_index()
         df_agg['Fecha'] = pd.to_datetime(df_agg['Mes_Año'] + '-01')
         df_agg = df_agg.sort_values('Fecha')
-        # Formato de fecha para mostrar en el eje
         df_agg['Fecha_str'] = df_agg['Fecha'].dt.strftime('%b %Y')
     else:
         df_filtrado['Semana_Año'] = df_filtrado['F. Emisión'].dt.to_period('W').astype(str)
@@ -205,7 +207,6 @@ with tab1:
         df_agg = df_agg.dropna(subset=['Fecha']).sort_values('Fecha')
         df_agg['Fecha_str'] = df_agg['Fecha'].dt.strftime('Sem %W %b %Y')
     
-    # Título dinámico
     filtros_nombres = []
     if clientes: filtros_nombres.append(f"Cliente: {', '.join(clientes[:2])}")
     if productos: filtros_nombres.append(f"Producto: {', '.join(productos[:2])}")
@@ -254,7 +255,6 @@ with tab2:
         fig.update_layout(height=450, xaxis_tickangle=-45)
         return fig
     
-    # Heatmaps
     if 'Región' in df_filtrado.columns:
         st.plotly_chart(plot_heatmap_full(df_filtrado, 'Región', title='Ventas por Mes y Región'), use_container_width=True)
     if 'Línea' in df_filtrado.columns:
@@ -262,7 +262,6 @@ with tab2:
     if 'Categoría' in df_filtrado.columns:
         st.plotly_chart(plot_heatmap_full(df_filtrado, 'Categoría', title='Ventas por Mes y Categoría'), use_container_width=True)
     
-    # Heatmap Dropsize
     st.write("**Mapa de Calor: Dropsize Promedio por Mes y Región**")
     if 'Región' in df_filtrado.columns and 'Dropsize' in df_filtrado.columns:
         df_dropsize = df_filtrado.groupby(['Mes_Año', 'Región'], as_index=False)['Dropsize'].mean()
@@ -283,13 +282,11 @@ with tab2:
     else:
         st.info("No hay datos de Región o Dropsize para este heatmap.")
     
-    # GRÁFICOS TOP DINÁMICOS
     st.write("---")
     st.subheader("📊 Top Dinámico por Ticket Promedio y Dropsize")
     
     top_n = st.slider("Número de elementos en el top", min_value=3, max_value=10, value=5, key="top_n")
     
-    # Ticket Promedio por Cliente
     top_ticket = df_filtrado.groupby('Nombre Cliente').agg({
         'Precio Por Renglon': 'sum',
         'N° Documento': 'nunique'
@@ -315,7 +312,6 @@ with tab2:
         """)
         st.caption("El ticket promedio se calcula a nivel global para el período filtrado.")
     
-    # Dropsize por Cliente
     top_dropsize = df_filtrado.groupby('Nombre Cliente')['Dropsize'].mean().reset_index()
     top_dropsize = top_dropsize.sort_values('Dropsize', ascending=False).head(top_n)
     
@@ -329,12 +325,11 @@ with tab2:
     st.plotly_chart(fig_top_dropsize, use_container_width=True)
 
 # ============================================================
-# TAB 3: PRONÓSTICOS (sin anotación flotante)
+# TAB 3: PRONÓSTICOS
 # ============================================================
 with tab3:
     st.subheader("Pronóstico de Ventas")
     
-    # Preparar serie
     if filtro_tiempo == "Mensual":
         series = df_filtrado.groupby('Mes_Año')['Precio Por Renglon'].sum()
         series.index = pd.to_datetime(series.index + '-01')
@@ -373,7 +368,7 @@ with tab3:
         else:
             forecast_ma = None
         
-        # ARIMA (con manejo de errores para evitar fallos)
+        # ARIMA
         try:
             adf_result = adfuller(series.dropna())
             p_value = adf_result[1]
@@ -443,7 +438,6 @@ with tab3:
                                               mode='lines+markers', name=f'✅ Mejor ({best_method})', 
                                               line=dict(color='#ff7f0e', width=4)))
         
-        # Título dinámico
         filtros_nombres_fc = []
         if clientes: filtros_nombres_fc.append(f"Cliente: {', '.join(clientes[:2])}")
         if productos: filtros_nombres_fc.append(f"Producto: {', '.join(productos[:2])}")
@@ -457,7 +451,6 @@ with tab3:
         fig_forecast.update_xaxes(tickangle=-45)
         st.plotly_chart(fig_forecast, use_container_width=True)
         
-        # Tabla comparativa con columna de pronóstico
         with st.expander("📊 Comparación de modelos de pronóstico (MAE)"):
             if len(series) >= 6:
                 df_errors = pd.DataFrame(list(errors.items()), columns=['Modelo', 'MAE'])
@@ -503,7 +496,7 @@ with tab3:
             st.markdown("- **ARIMA**: modelo autorregresivo integrado de media móvil, robusto para series con autocorrelación.")
 
 # ============================================================
-# TAB 4: CLIENTES RFM (con expander de criterios)
+# TAB 4: CLIENTES RFM
 # ============================================================
 with tab4:
     st.subheader("Segmentación RFM de Clientes")
